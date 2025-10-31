@@ -30,6 +30,8 @@
    - waline部署请参考 https://waline.js.org/guide/get-started/
    - 将地址配置到_config.yml中
 
+3. 其他配置请参考原 [Shoka文档](https://shoka.lostyu.me/computer-science/note/theme-shoka-doc/)
+
 ```yaml
 waline:
   url: http://your-waline-url
