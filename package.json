@@ -1,0 +1,37 @@
+{
+  "name": "hexo-site",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "hexo generate",
+    "clean": "hexo clean",
+    "deploy": "hexo deploy",
+    "server": "hexo server",
+    "algolia": "hexo algolia",
+    "sync": "node notion_sync.js"
+  },
+  "hexo": {
+    "version": "7.3.0"
+  },
+  "dependencies": {
+    "@notionhq/client": "^5.3.0",
+    "chalk": "^4.1.0",
+    "dotenv": "^17.2.3",
+    "hexo": "^7.0.0",
+    "hexo-algoliasearch": "^2.0.1",
+    "hexo-autoprefixer": "^2.0.0",
+    "hexo-feed": "^1.1.2",
+    "hexo-generator-archive": "^2.0.0",
+    "hexo-generator-category": "^2.0.0",
+    "hexo-generator-index": "^4.0.0",
+    "hexo-generator-tag": "^2.0.0",
+    "hexo-renderer-ejs": "^2.0.0",
+    "hexo-renderer-multi-markdown-it": "^0.1.5",
+    "hexo-renderer-stylus": "^3.0.1",
+    "hexo-server": "^3.0.0",
+    "hexo-symbols-count-time": "^0.7.1",
+    "hexo-theme-landscape": "^1.0.0",
+    "mkdirp": "^3.0.1",
+    "notion-to-md": "^3.1.9"
+  }
+}
