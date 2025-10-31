@@ -10,6 +10,7 @@ dotenv.config();
 const postDir = 'source/_posts'
 const assetsDir = 'source/assets'
 const assetsPrefix = 'assets';
+const dbFile = 'notion_db.json';
 
 const notion = new Client({
     auth: process.env.NOTION_TOKEN
@@ -17,8 +18,40 @@ const notion = new Client({
 
 const n2m = new NotionToMarkdown({ notionClient: notion });
 
+// 读取数据库文件
+function readDb() {
+    try {
+        if (fs.existsSync(dbFile)) {
+            const data = fs.readFileSync(dbFile, 'utf8');
+            return JSON.parse(data);
+        }
+    } catch (error) {
+        console.error('读取数据库文件失败:', error);
+    }
+    return {};
+}
+
+// 写入数据库文件
+function writeDb(db) {
+    try {
+        fs.writeFileSync(dbFile, JSON.stringify(db, null, 2), 'utf8');
+    } catch (error) {
+        console.error('写入数据库文件失败:', error);
+    }
+}
+
+// 删除目录及其内容
+function deleteDir(dirPath) {
+    if (fs.existsSync(dirPath)) {
+        fs.rmSync(dirPath, { recursive: true, force: true });
+    }
+}
+
 async function syncNotionToHexo() {
     try {
+        // 读取数据库
+        const db = readDb();
+
         // 1. 获取文章列表
         const response = await notion.dataSources.query({
             data_source_id: process.env.NOTION_DATA_SOURCE,
@@ -40,8 +73,32 @@ async function syncNotionToHexo() {
         // 2. 处理每篇文章
         for (const post of response.results) {
             try {
-                // 获取标题
+                // 获取标题和最后编辑时间
                 const title = post.properties.Title?.title[0]?.plain_text || 'Untitled';
+                const lastEditedTime = post.last_edited_time;
+
+                console.log(`处理文章: ${title}`);
+                console.log(`最后编辑时间: ${lastEditedTime}`);
+
+                // 检查数据库中是否有记录
+                const postId = post.id;
+                const dbRecord = db[postId];
+
+                // 如果数据库中有记录且最后编辑时间没有变化，则跳过
+                if (dbRecord && dbRecord.lastEditedTime === lastEditedTime) {
+                    console.log(`文章 ${title} 未发生变化，跳过处理`);
+                    continue;
+                }
+
+                console.log(`文章 ${title} 需要更新`);
+
+                // 如果是更新操作，先删除旧的图片目录
+                if (dbRecord) {
+                    const oldAssetsPostDir = path.join(assetsDir, postId);
+                    deleteDir(oldAssetsPostDir);
+                    console.log(`已删除旧的图片目录: ${oldAssetsPostDir}`);
+                }
+
                 // 获取创建时间
                 const dateObj = post.properties.Date?.date?.start
                     ? new Date(post.properties.Date.date.start)
@@ -51,14 +108,14 @@ async function syncNotionToHexo() {
                 const tags = extractTags(post);
                 const categories = extractCategories(post);
 
-                const assetsPostDir = path.join(assetsDir, post.id);
+                const assetsPostDir = path.join(assetsDir, postId);
                 await mkdirp(assetsPostDir);
 
                 let cover = '';
                 if (post.properties.Cover?.files?.length) {
-                    const coverName = Date.now() + '_' +post.properties.Cover.files[0].name
+                    const coverName = Date.now() + '_' + post.properties.Cover.files[0].name
                     await downloadImage(post.properties.Cover.files[0].file.url, assetsPostDir, coverName)
-                    cover = path.join(assetsPrefix, post.id, coverName)
+                    cover = path.join(assetsPrefix, postId, coverName)
                 }
 
                 // 生成Markdown头部
@@ -71,24 +128,34 @@ cover: ${cover}
 ---\n\n`;
 
                 const blocks = await notion.blocks.children.list({
-                    block_id: post.id
+                    block_id: postId
                 });
                 const mdBlocks = await n2m.blocksToMarkdown(blocks.results)
                 const mdStringObj = n2m.toMarkdownString(mdBlocks);
 
-                const mdString = await dealMdImage(mdStringObj.parent, post.id);
+                const mdString = await dealMdImage(mdStringObj.parent, postId);
 
-                content+=mdString;
+                content += mdString;
 
                 // 写入Markdown文件
-                const filePath = path.join(postDir, `${post.id}.md`);
+                const filePath = path.join(postDir, `${postId}.md`);
                 fs.writeFileSync(filePath, content, 'utf8');
                 console.log(`成功生成: ${filePath}`);
-//
+
+                // 更新数据库记录
+                db[postId] = {
+                    lastEditedTime: lastEditedTime,
+                    title: title
+                };
+                writeDb(db);
+                console.log(`已更新数据库记录 for ${title}`);
+
             } catch (error) {
                 console.error(`处理文章时出错`, error);
             }
         }
+
+        console.log('同步完成');
     } catch (error) {
         console.error(`同步失败`, error);
         process.exit(1);
@@ -138,7 +205,7 @@ const dealMdImage = async (mdString, postId) => {
                 try {
                     const imgName = Date.now() + '_' + path.basename(new URL(match.url).pathname);
                     await downloadImage(match.url, path.join(assetsDir, postId), imgName)
-                    mdString = mdString.replaceAll(match.url, path.join('/'+assetsPrefix, postId, imgName))
+                    mdString = mdString.replaceAll(match.url, path.join('/' + assetsPrefix, postId, imgName))
                 } catch (e) {
                     console.error(e);
                 }
