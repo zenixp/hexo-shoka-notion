@@ -70,18 +70,24 @@ async function syncNotionToHexo() {
             return;
         }
 
+        // 收集当前Notion中的文章ID
+        const currentPostIds = new Set();
+        
         // 2. 处理每篇文章
         for (const post of response.results) {
             try {
                 // 获取标题和最后编辑时间
                 const title = post.properties.Title?.title[0]?.plain_text || 'Untitled';
                 const lastEditedTime = post.last_edited_time;
+                const postId = post.id;
+                
+                // 添加到当前文章ID集合
+                currentPostIds.add(postId);
 
                 console.log(`处理文章: ${title}`);
                 console.log(`最后编辑时间: ${lastEditedTime}`);
 
                 // 检查数据库中是否有记录
-                const postId = post.id;
                 const dbRecord = db[postId];
 
                 // 如果数据库中有记录且最后编辑时间没有变化，则跳过
@@ -154,6 +160,30 @@ cover: ${cover}
                 console.error(`处理文章时出错`, error);
             }
         }
+        
+        // 3. 删除不在Notion中的文章
+        console.log('检查需要删除的文章...');
+        for (const postId in db) {
+            if (!currentPostIds.has(postId)) {
+                console.log(`删除本地文章: ${db[postId].title} (${postId})`);
+                
+                // 删除markdown文件
+                const filePath = path.join(postDir, `${postId}.md`);
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                    console.log(`已删除文件: ${filePath}`);
+                }
+                
+                // 删除图片目录
+                const assetsPostDir = path.join(assetsDir, postId);
+                deleteDir(assetsPostDir);
+                console.log(`已删除图片目录: ${assetsPostDir}`);
+                
+                // 从数据库中删除记录
+                delete db[postId];
+            }
+        }
+        writeDb(db);
 
         console.log('同步完成');
     } catch (error) {

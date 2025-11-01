@@ -1,0 +1,42 @@
+# GitLab CI/CD 配置文件
+# 每天定时执行 Notion 同步任务，如果文件有变化则自动提交更新
+
+stages:
+  - sync
+
+variables:
+  GIT_STRATEGY: clone
+  GIT_DEPTH: 0
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - node_modules/
+
+# 定时同步 Notion 内容
+sync-notion:
+  stage: sync
+  image: node:18
+  before_script:
+    - yarn install
+    - echo "NOTION_TOKEN=$NOTION_TOKEN" > .env
+    - echo "NOTION_DATA_SOURCE=$NOTION_DATA_SOURCE" >> .env
+    - git config --global user.email "gitlab-ci@zenixp.com"
+    - git config --global user.name "GitLab CI"
+  script:
+    - node notion_sync.js
+    - |
+      if [ -n "$(git status --porcelain)" ]; then
+        echo "检测到文件变化，准备提交..."
+        git add source/_posts/ source/assets/ notion_db.json
+        git commit -m "Auto sync from Notion $(date +%Y-%m-%d)"
+        git push origin HEAD:$CI_COMMIT_REF_NAME
+        echo "代码已提交并推送"
+      else
+        echo "没有检测到文件变化，无需提交"
+      fi
+  tags:
+  - docker
+  only:
+    - schedules
+    - web
