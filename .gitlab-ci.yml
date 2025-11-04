@@ -1,28 +1,35 @@
 # GitLab CI/CD 配置文件
 # 每天定时执行 Notion 同步任务，如果文件有变化则自动提交更新
+# 同时支持推送时自动打包部署
 
 stages:
   - sync
+  - build
+  - archive
+  - deploy
 
 variables:
   GIT_STRATEGY: clone
   GIT_DEPTH: 0
+  IMAGE_NAME: <private-registry>/hexo-blog # <private-registry> 替换为私有仓库
 
 cache:
   key: ${CI_COMMIT_REF_SLUG}
   paths:
     - node_modules/
+    - yarn.lock
 
 # 定时同步 Notion 内容
 sync-notion:
   stage: sync
   image: node:18
   before_script:
-    - yarn install
+    - yarn install --ignore-script
     - echo "NOTION_TOKEN=$NOTION_TOKEN" > .env
     - echo "NOTION_DATA_SOURCE=$NOTION_DATA_SOURCE" >> .env
     - git config --global user.email "gitlab-ci@zenixp.com"
     - git config --global user.name "GitLab CI"
+    - git remote set-url origin "http://root:$GIT_PUSH_TOKEN@<private-git>" # <private-git> 替换为自己的代码仓库
   script:
     - node notion_sync.js
     - |
@@ -40,3 +47,66 @@ sync-notion:
   only:
     - schedules
     - web
+
+# 推送时构建静态文件
+build-site:
+  stage: build
+  image: node:18
+  before_script:
+    - yarn install --ignore-script
+  script:
+    - yarn run build
+  artifacts:
+    paths:
+      - public/
+  tags:
+    - docker
+  only:
+    - main
+  except:
+    - schedules
+
+build-image:
+  stage: archive
+  image: docker:20.10.24
+  variables:
+     DOCKER_HOST: unix:///var/run/docker.sock
+  before_script:
+    - docker login $PRIVATE_REGISTRY -u $PRIVATE_REGISTRY_USER -p $PRIVATE_REGISTRY_PASSWORD
+  script:
+    - |
+      docker build --pull -t $IMAGE_NAME:$CI_COMMIT_SHA .
+      docker push $IMAGE_NAME:$CI_COMMIT_SHA
+  tags:
+    - docker
+  only:
+    - main
+  except:
+    - schedules
+  dependencies:
+    - build-site
+
+# 部署到 Kubernetes
+deploy-to-k8s:
+  stage: deploy
+  image:
+    name: lachlanevenson/k8s-kubectl
+    entrypoint: [""]
+  before_script:
+    # 配置 kubectl 连接到远程 Kubernetes 集群
+    - echo "$K8S_CONFIG" | base64 -d > /tmp/kubeconfig
+    - export KUBECONFIG=/tmp/kubeconfig
+  script:
+    - |
+      kubectl cluster-info
+      sed -i "s|image: hexo-blog:latest|image: $IMAGE_NAME:$CI_COMMIT_SHA|g" deployment.yaml
+      kubectl apply -f deployment.yaml
+      kubectl rollout status deployment/hexo-blog
+  tags:
+    - docker
+  only:
+    - main
+  except:
+    - schedules
+  dependencies:
+    - build-image
